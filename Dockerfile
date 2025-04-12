@@ -1,47 +1,48 @@
-# Use Node.js as the base image for testing frontend builds
-FROM node:18-alpine AS build
+# Simple test Dockerfile
+FROM alpine:latest
 
-# Set up build arguments (which will be mapped to secrets)
+# Set up args that will be mapped to secrets
 ARG API_KEY
 ARG DATABASE_URL
-ARG AUTH_SECRET
+ARG JWT_SECRET
 
-# Create a working directory
+# First RUN command will be auto-modified to mount the .env file
+RUN echo "===== Testing Secrets =====" && \
+    echo "API_KEY is set: $([ -n "$API_KEY" ] && echo 'yes' || echo 'no')" && \
+    echo "DATABASE_URL is set: $([ -n "$DATABASE_URL" ] && echo 'yes' || echo 'no')" && \
+    echo "JWT_SECRET is set: $([ -n "$JWT_SECRET" ] && echo 'yes' || echo 'no')"
+
+# Second RUN command will also get the .env mount
+RUN if [ -f .env ]; then \
+      echo "===== .env file found =====" && \
+      cat .env | sed 's/^/  /' && \
+      echo "===== End of .env =====" && \
+      echo "Loading .env..." && \
+      export $(grep -v '^#' .env | xargs); \
+    else \
+      echo "No .env file found"; \
+    fi
+
+# Test that environment variables from the .env file are accessible
+RUN if [ -n "$DB_CONNECTION" ]; then \
+      echo "DB_CONNECTION from .env: $DB_CONNECTION"; \
+    else \
+      echo "DB_CONNECTION not found in environment"; \
+    fi
+
+# This command tries to access the .env file directly (to verify it's not in the build context)
+RUN if [ -f /app/.env ]; then \
+      echo "WARNING: .env file found in build context at /app/.env"; \
+    else \
+      echo "Good: .env file is not in the build context"; \
+    fi
+
+# Create a minimal application
+RUN mkdir -p /app
 WORKDIR /app
+RUN echo '#!/bin/sh' > /app/start.sh && \
+    echo 'echo "Application starting with environment variables:"' >> /app/start.sh && \
+    echo 'env | sort' >> /app/start.sh && \
+    chmod +x /app/start.sh
 
-# First, test individual secret variables
-RUN echo "Testing individual secret access:"
-RUN echo "API_KEY is set: $([ ! -z "$API_KEY" ] && echo "Yes" || echo "No")"
-RUN echo "DATABASE_URL is set: $([ ! -z "$DATABASE_URL" ] && echo "Yes" || echo "No")"
-RUN echo "AUTH_SECRET is set: $([ ! -z "$AUTH_SECRET" ] && echo "Yes" || echo "No")"
-
-# Create a basic package.json file for testing
-RUN echo '{"name":"secret-test","version":"1.0.0","scripts":{"test-env":"node test-env.js"}}' > package.json
-
-# Create a test script to check .env file
-RUN echo 'console.log("Checking for .env file:");' > test-env.js
-RUN echo 'const fs = require("fs");' >> test-env.js
-RUN echo 'if (fs.existsSync(".env")) {' >> test-env.js
-RUN echo '  console.log("Found .env file with content:");' >> test-env.js
-RUN echo '  console.log(fs.readFileSync(".env", "utf8"));' >> test-env.js
-RUN echo '} else {' >> test-env.js
-RUN echo '  console.log(".env file not found");' >> test-env.js
-RUN echo '}' >> test-env.js
-
-# Second, test mounting the .env file
-RUN --mount=type=secret,id=env,dst=.env \
-    echo "Testing .env file access:" && \
-    cat .env 2>/dev/null || echo ".env file not mounted" && \
-    npm run test-env
-
-# Create a simple web app that will use environment variables
-RUN echo 'console.log("Environment variables available at runtime:");' > app.js
-RUN echo 'console.log(`API_KEY: ${process.env.API_KEY || "Not set"}`);' >> app.js
-RUN echo 'console.log(`DATABASE_URL: ${process.env.DATABASE_URL || "Not set"}`);' >> app.js
-RUN echo 'console.log(`AUTH_SECRET: ${process.env.AUTH_SECRET || "Not set"}`);' >> app.js
-
-# Final test: see if environment variables are available at runtime
-FROM node:18-alpine AS final
-WORKDIR /app
-COPY --from=build /app/app.js .
-CMD ["node", "app.js"]
+CMD ["/app/start.sh"]
