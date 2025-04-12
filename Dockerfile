@@ -1,44 +1,48 @@
-# Basic Node.js application Dockerfile
-FROM node:18-alpine
+# Simple test Dockerfile
+FROM alpine:latest
 
-# Set working directory
+# Set up args that will be mapped to secrets
+ARG API_KEY
+ARG DATABASE_URL
+ARG JWT_SECRET
+
+# First RUN command will be auto-modified to mount the .env file
+RUN echo "===== Testing Secrets =====" && \
+    echo "API_KEY is set: $([ -n "$API_KEY" ] && echo 'yes' || echo 'no')" && \
+    echo "DATABASE_URL is set: $([ -n "$DATABASE_URL" ] && echo 'yes' || echo 'no')" && \
+    echo "JWT_SECRET is set: $([ -n "$JWT_SECRET" ] && echo 'yes' || echo 'no')"
+
+# Second RUN command will also get the .env mount
+RUN if [ -f .env ]; then \
+      echo "===== .env file found =====" && \
+      cat .env | sed 's/^/  /' && \
+      echo "===== End of .env =====" && \
+      echo "Loading .env..." && \
+      export $(grep -v '^#' .env | xargs); \
+    else \
+      echo "No .env file found"; \
+    fi
+
+# Test that environment variables from the .env file are accessible
+RUN if [ -n "$DB_CONNECTION" ]; then \
+      echo "DB_CONNECTION from .env: $DB_CONNECTION"; \
+    else \
+      echo "DB_CONNECTION not found in environment"; \
+    fi
+
+# This command tries to access the .env file directly (to verify it's not in the build context)
+RUN if [ -f /app/.env ]; then \
+      echo "WARNING: .env file found in build context at /app/.env"; \
+    else \
+      echo "Good: .env file is not in the build context"; \
+    fi
+
+# Create a minimal application
+RUN mkdir -p /app
 WORKDIR /app
+RUN echo '#!/bin/sh' > /app/start.sh && \
+    echo 'echo "Application starting with environment variables:"' >> /app/start.sh && \
+    echo 'env | sort' >> /app/start.sh && \
+    chmod +x /app/start.sh
 
-# First stage: Install dependencies
-COPY package*.json ./
-RUN npm install
-
-# Second stage: Run tests to verify environment variables
-RUN echo "Testing environment variables..." && \
-    echo "API_KEY=${API_KEY:-not set}" && \
-    echo "DATABASE_URL=${DATABASE_URL:-not set}" && \
-    echo "JWT_SECRET=${JWT_SECRET:-not set}"
-
-# Third stage: Verify the .env file mounting
-RUN echo "Checking if .env file is mounted..." && \
-    if [ -f .env ]; then \
-      echo ".env file is available:" && \
-      cat .env | grep -v PASSWORD; \
-    else \
-      echo ".env file is NOT available"; \
-    fi
-
-# Fourth stage: Copy application code and build
-COPY . .
-RUN echo "Building application..." && \
-    echo "Using environment from .env file (if mounted)" && \
-    # Simulate a build with environment variables
-    if [ -f .env ]; then \
-      echo "Building with .env file"; \
-      # We could source the .env here if needed \
-    else \
-      echo "Building without .env file"; \
-    fi
-
-# Final stage: Create a simple output
-RUN echo "Build completed successfully!" > /app/build_result.txt && \
-    echo "Environment variables were used securely." >> /app/build_result.txt
-
-# Expose port and set start command
-EXPOSE 3000
-CMD ["node", "index.js"]
+CMD ["/app/start.sh"]
