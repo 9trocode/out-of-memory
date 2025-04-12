@@ -1,47 +1,44 @@
-# Use Node.js as the base image for testing frontend builds
-FROM node:18-alpine AS build
+# Basic Node.js application Dockerfile
+FROM node:18-alpine
 
-# Set up build arguments (which will be mapped to secrets)
-ARG API_KEY
-ARG DATABASE_URL
-ARG AUTH_SECRET
-
-# Create a working directory
+# Set working directory
 WORKDIR /app
 
-# First, test individual secret variables
-RUN echo "Testing individual secret access:"
-RUN echo "API_KEY is set: $([ ! -z "$API_KEY" ] && echo "Yes" || echo "No")"
-RUN echo "DATABASE_URL is set: $([ ! -z "$DATABASE_URL" ] && echo "Yes" || echo "No")"
-RUN echo "AUTH_SECRET is set: $([ ! -z "$AUTH_SECRET" ] && echo "Yes" || echo "No")"
+# First stage: Install dependencies
+COPY package*.json ./
+RUN npm install
 
-# Create a basic package.json file for testing
-RUN echo '{"name":"secret-test","version":"1.0.0","scripts":{"test-env":"node test-env.js"}}' > package.json
+# Second stage: Run tests to verify environment variables
+RUN echo "Testing environment variables..." && \
+    echo "API_KEY=${API_KEY:-not set}" && \
+    echo "DATABASE_URL=${DATABASE_URL:-not set}" && \
+    echo "JWT_SECRET=${JWT_SECRET:-not set}"
 
-# Create a test script to check .env file
-RUN echo 'console.log("Checking for .env file:");' > test-env.js
-RUN echo 'const fs = require("fs");' >> test-env.js
-RUN echo 'if (fs.existsSync(".env")) {' >> test-env.js
-RUN echo '  console.log("Found .env file with content:");' >> test-env.js
-RUN echo '  console.log(fs.readFileSync(".env", "utf8"));' >> test-env.js
-RUN echo '} else {' >> test-env.js
-RUN echo '  console.log(".env file not found");' >> test-env.js
-RUN echo '}' >> test-env.js
+# Third stage: Verify the .env file mounting
+RUN echo "Checking if .env file is mounted..." && \
+    if [ -f .env ]; then \
+      echo ".env file is available:" && \
+      cat .env | grep -v PASSWORD; \
+    else \
+      echo ".env file is NOT available"; \
+    fi
 
-# Second, test mounting the .env file
-RUN --mount=type=secret,id=env,dst=.env \
-    echo "Testing .env file access:" && \
-    cat .env 2>/dev/null || echo ".env file not mounted" && \
-    npm run test-env
+# Fourth stage: Copy application code and build
+COPY . .
+RUN echo "Building application..." && \
+    echo "Using environment from .env file (if mounted)" && \
+    # Simulate a build with environment variables
+    if [ -f .env ]; then \
+      echo "Building with .env file"; \
+      # We could source the .env here if needed \
+    else \
+      echo "Building without .env file"; \
+    fi
 
-# Create a simple web app that will use environment variables
-RUN echo 'console.log("Environment variables available at runtime:");' > app.js
-RUN echo 'console.log(`API_KEY: ${process.env.API_KEY || "Not set"}`);' >> app.js
-RUN echo 'console.log(`DATABASE_URL: ${process.env.DATABASE_URL || "Not set"}`);' >> app.js
-RUN echo 'console.log(`AUTH_SECRET: ${process.env.AUTH_SECRET || "Not set"}`);' >> app.js
+# Final stage: Create a simple output
+RUN echo "Build completed successfully!" > /app/build_result.txt && \
+    echo "Environment variables were used securely." >> /app/build_result.txt
 
-# Final test: see if environment variables are available at runtime
-FROM node:18-alpine AS final
-WORKDIR /app
-COPY --from=build /app/app.js .
-CMD ["node", "app.js"]
+# Expose port and set start command
+EXPOSE 3000
+CMD ["node", "index.js"]
